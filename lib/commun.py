@@ -1,5 +1,6 @@
-"""Éléments partagés par les pages : récepteur AIS unique, météo en cache, indicateurs, tuiles."""
+"""Éléments partagés par les pages : récepteur AIS unique, météo en cache, indicateurs."""
 import os
+import time
 
 import pandas as pd
 import streamlit as st
@@ -27,6 +28,10 @@ def meteo(nom_zone: str) -> dict:
     return direct.meteo(direct.ZONES[nom_zone])
 
 
+def _depuis_depart(r) -> float:
+    return time.time() - r.depart
+
+
 def navires(nom_zone: str) -> tuple:
     """Renvoie (DataFrame des navires, message, secours?)."""
     zone, r = direct.ZONES[nom_zone], recepteur()
@@ -34,29 +39,17 @@ def navires(nom_zone: str) -> tuple:
     if liste:
         return pd.DataFrame(liste), None, False
     s = r.secours(zone)
-    if s and (r.erreur or time_depuis_depart(r) > 600):
+    if s and (r.erreur or _depuis_depart(r) > 600):
         return pd.DataFrame(s["navires"]), f"flux AIS indisponible, instantané du {s['releve']}", True
-    # Message explicite : la page doit dire si le flux marche, même quand aucun navire n'est dans la zone.
     if r.erreur:
         msg = f"connexion AIS en erreur : {r.erreur}"
     elif not r.connecte:
         msg = "connexion AIS en cours d'établissement, patientez une minute"
-    elif time_depuis_depart(r) < 120:
+    elif _depuis_depart(r) < 120:
         msg = "connexion AIS active, premières positions en attente"
     else:
         msg = f"connexion AIS active, {r.recus} messages reçus, aucun navire dans cette zone pour l'instant"
     return pd.DataFrame(), msg, False
-
-
-def time_depuis_depart(r) -> float:
-    import time
-    return time.time() - r.depart
-
-
-def tuile(col, titre, valeur, delta, reference, maj, aide=None, inverse=False):
-    with col:
-        st.metric(titre, valeur, delta, delta_color="inverse" if inverse else "normal", help=aide, border=True)
-        st.caption(f"Réf. : {reference}  \nMàJ : {maj}")
 
 
 @st.cache_data
@@ -68,12 +61,11 @@ def indicateurs_historiques() -> dict:
     an19 = commun[commun.year == 2019]
     prev = prevoir(lb.dropna(), 3)
     mois_prev = prev.mois.iloc[0]
-    c = cppi()
     return {
         "dernier": dernier, "lb": lb[dernier], "lb_n1": lb[dernier - pd.DateOffset(years=1)],
         "part": lb[douze].sum() / (lb[douze].sum() + la[douze].sum()) * 100,
         "part19": lb[an19].sum() / (lb[an19].sum() + la[an19].sum()) * 100,
         "prev": prev, "mois_prev": mois_prev, "ref_prev": lb[mois_prev - pd.DateOffset(years=1)],
-        "test": tester(lb.dropna(), 12), "cppi": c,
-        "maj": f"données à fin {mois_fr(dernier)} (BTS pour LB, port pour LA), récupérées le 19/11/2026",
+        "test": tester(lb.dropna(), 12), "cppi": cppi(), "lb_serie": lb.dropna(), "la_serie": la.dropna(),
+        "maj": f"données à fin {mois_fr(dernier)}, récupérées le 19/11/2026",
     }
